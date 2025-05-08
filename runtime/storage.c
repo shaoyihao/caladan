@@ -339,6 +339,7 @@ int storage_init_thread(void)
  */
 int storage_init(void)
 {
+    log_info("start init SPDK\n");
 	int shm_id, rc;
 	struct spdk_env_opts opts;
 	void *buf;
@@ -392,8 +393,59 @@ int storage_init(void)
 		&storage_buf_mp, "storagebufs", TCACHE_DEFAULT_MAG_SIZE);
 	if (!storage_buf_tcache)
 		return -ENOMEM;
+	
+	myqpair = spdk_nvme_ctrlr_alloc_io_qpair(controller, NULL, 0);
+	if (myqpair == NULL) 
+	{
+		log_info("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
+		return;
+	}
 
+	log_info("SPDK storage init successfully!");
 	return 0;
+}
+
+static void mywrite_complete(void *arg, const struct spdk_nvme_cpl *completion)
+{
+	log_info("write completed!");
+}
+void mywrite()
+{
+	log_info("invoke mywrite()!");
+	
+	char *buf = spdk_zmalloc(0x1000, 0x1000, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	if (buf == NULL) {
+		log_info("ERROR: write buffer allocation failed\n");
+		return;
+	}
+	snprintf(buf, 0x1000, "%s", "Hello world hhh!");
+	int rc = spdk_nvme_ns_cmd_write(spdk_namespace, myqpair, buf, 0, 1, mywrite_complete, NULL, 0);
+	if (rc != 0) {
+		log_info("starting write I/O failed\n");
+		return;
+	}
+}
+
+static void myread_complete(void *arg, const struct spdk_nvme_cpl *completion)
+{
+	log_info("read completed!");
+
+	char *buf = (char*)arg;
+	log_info("data: %s\n", buf);
+}
+void myread()
+{
+	log_info("invoke myread()!");
+	char *buf = spdk_zmalloc(0x1000, 0x1000, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	if (buf == NULL) {
+		log_info("ERROR: write buffer allocation failed\n");
+		return;
+	}
+	int rc = spdk_nvme_ns_cmd_read(spdk_namespace, myqpair, buf, 0, 1, myread_complete, (void*)buf, 0);
+	if (rc != 0) {
+		log_info("starting read I/O failed\n");
+		return;
+	}
 }
 
 #else

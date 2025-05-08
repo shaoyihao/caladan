@@ -145,3 +145,8 @@ extern uint64_t thread_get_total_cycles(thread_t *th);
 extern void thread_yield(void);
 extern int thread_spawn(thread_fn_t fn, void *arg);
 extern void thread_exit(void) __noreturn;
+
+extern int thread_yield_waitIO();
+extern volatile thread_t* uthread_IO;
+extern struct spdk_nvme_qpair* myqpair;
+extern spinlock_t uT_l;

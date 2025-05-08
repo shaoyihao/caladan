@@ -853,6 +853,28 @@ void thread_yield(void)
 	enter_schedule(curth);
 }
 
+volatile thread_t* uthread_IO = NULL;
+struct spdk_nvme_qpair* myqpair;
+DEFINE_SPINLOCK(uT_l);
+int thread_yield_waitIO()
+{	
+	uthread_IO = thread_self();
+	mywrite();
+	preempt_disable();
+	log_info("ENTER Scheduler!");
+	enter_schedule(uthread_IO);
+	log_info("Get scheduled Again! Return back!");
+
+	uthread_IO = thread_self();
+	myread();
+	preempt_disable();
+	log_info("ENTER Scheduler again!");
+	enter_schedule(uthread_IO);
+	log_info("Get scheduled Again! We're finally back!");
+
+	return 517;
+}
+
 static __always_inline thread_t *__thread_create(void)
 {
 	struct thread *th;

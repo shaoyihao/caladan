@@ -165,7 +165,7 @@ static void *__mem_map_shm(mem_key_t key, void *base, size_t len,
 	case PGSIZE_4KB:
 		break;
 	case PGSIZE_2MB:
-		flags |= SHM_HUGETLB;
+		// flags |= SHM_HUGETLB;
 #ifdef SHM_HUGE_2MB
 		flags |= SHM_HUGE_2MB;
 #endif

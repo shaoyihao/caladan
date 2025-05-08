@@ -71,6 +71,19 @@ bool softirq_run_locked(struct kthread *k)
 		work_done = true;
 	}
 
+	if (spin_try_lock(&uT_l))
+	{
+		// if (uthread_IO && rand_crc32c(1) % 10000 == 0)
+		if (uthread_IO && spdk_nvme_qpair_process_completions(myqpair, 0) == 1)
+		{	
+			thread_ready(uthread_IO);
+			uthread_IO = NULL;
+			log_info("\nnow uthread_IO = NULL\n\n");
+			work_done = true;
+		}
+		spin_unlock(&uT_l);
+	}
+
 	k->last_softirq_tsc = now_tsc;
 	return work_done;
 }
