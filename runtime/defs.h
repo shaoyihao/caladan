@@ -42,6 +42,10 @@
 #define XSAVE_AREA_SIZE (24 * KB)
 #define XSAVE_AREA_PTR_SIZE (XSAVE_AREA_SIZE / sizeof(uintptr_t))
 
+#define PAD_TO_CACHE_LINE(name, size) \
+    char pad_##name[(CACHE_LINE_SIZE - ((size) % CACHE_LINE_SIZE)) % CACHE_LINE_SIZE]
+
+#define RESERVED_BLOCK_NUM 1000
 /*
  * Thread support
  */
@@ -327,6 +331,12 @@ struct timer_idx {
 	struct timer_entry	*e;
 };
 
+struct LBAPool
+{
+	uint64_t blocknum[RESERVED_BLOCK_NUM];
+	int top;
+};
+
 struct kthread {
 	/* 1st cache-line */
 	spinlock_t		lock;
@@ -377,7 +387,11 @@ struct kthread {
 #endif
 
 	/* 10th cache-line, statistics counters */
-	uint64_t		stats[STAT_NR];
+	uint64_t		stats[STAT_NR];    // 200B
+
+	/* my new cacheline */
+	PAD_TO_CACHE_LINE(stats_pad, 200);
+	struct LBAPool	 blocks;    // 为每个 kthread 保留一些 LBA 供使用
 };
 
 /* compile-time verification of cache-line alignment */
@@ -390,6 +404,7 @@ BUILD_ASSERT(offsetof(struct kthread, timer_lock) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
 #endif
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
+BUILD_ASSERT(offsetof(struct kthread, blocks) % CACHE_LINE_SIZE == 0);
 
 DECLARE_PERTHREAD(struct kthread *, mykthread);
 

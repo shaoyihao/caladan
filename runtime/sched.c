@@ -662,7 +662,7 @@ void thread_ready_locked(thread_t *th)
 void thread_ready_head_locked(thread_t *th)
 {
 	struct kthread *k = myk();
-	thread_t *oldestth;
+	thread_t *newestth;
 
 	assert_preempt_disabled();
 	assert_spin_lock_held(&k->lock);
@@ -671,10 +671,10 @@ void thread_ready_head_locked(thread_t *th)
 
 	if (k->rq_head != k->rq_tail)
 		th->ready_tsc = k->rq[k->rq_tail % RUNTIME_RQ_SIZE]->ready_tsc;
-	oldestth = k->rq[--k->rq_tail % RUNTIME_RQ_SIZE];
-	k->rq[k->rq_tail % RUNTIME_RQ_SIZE] = th;
+	newestth = k->rq[(k->rq_head - 1) % RUNTIME_RQ_SIZE];
+	k->rq[--k->rq_tail % RUNTIME_RQ_SIZE] = th;
 	if (unlikely(k->rq_head - k->rq_tail > RUNTIME_RQ_SIZE)) {
-		list_add(&k->rq_overflow, &oldestth->link);
+		list_add(&k->rq_overflow, &newestth->link);
 		k->rq_head--;
 		STAT(RQ_OVERFLOW)++;
 	}
@@ -854,19 +854,19 @@ void thread_yield(void)
 }
 
 volatile thread_t* uthread_IO = NULL;
-struct spdk_nvme_qpair* myqpair;
+// struct spdk_nvme_qpair* myqpair;
 DEFINE_SPINLOCK(uT_l);
 int thread_yield_waitIO()
 {	
 	uthread_IO = thread_self();
-	mywrite();
+	// mywrite();
 	preempt_disable();
 	log_info("ENTER Scheduler!");
 	enter_schedule(uthread_IO);
 	log_info("Get scheduled Again! Return back!");
 
 	uthread_IO = thread_self();
-	myread();
+	// myread();
 	preempt_disable();
 	log_info("ENTER Scheduler again!");
 	enter_schedule(uthread_IO);

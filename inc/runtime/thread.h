@@ -148,5 +148,5 @@ extern void thread_exit(void) __noreturn;
 
 extern int thread_yield_waitIO();
 extern volatile thread_t* uthread_IO;
-extern struct spdk_nvme_qpair* myqpair;
+// extern struct spdk_nvme_qpair* myqpair;
 extern spinlock_t uT_l;

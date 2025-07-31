@@ -3,6 +3,7 @@
  */
 
 #include <runtime/storage.h>
+#include <../runtime/defs.h>     // kthread
 
 
 uint32_t block_size;
@@ -393,59 +394,49 @@ int storage_init(void)
 		&storage_buf_mp, "storagebufs", TCACHE_DEFAULT_MAG_SIZE);
 	if (!storage_buf_tcache)
 		return -ENOMEM;
-	
-	myqpair = spdk_nvme_ctrlr_alloc_io_qpair(controller, NULL, 0);
-	if (myqpair == NULL) 
-	{
-		log_info("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
-		return;
-	}
 
 	log_info("SPDK storage init successfully!");
 	return 0;
 }
 
-static void mywrite_complete(void *arg, const struct spdk_nvme_cpl *completion)
+void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)   // 读取 LBA[lba_start, lba_start+lba_count-1]，将前 siz B 复制到 obj（空间需提前申请） 
 {
-	log_info("write completed!");
-}
-void mywrite()
-{
-	log_info("invoke mywrite()!");
-	
-	char *buf = spdk_zmalloc(0x1000, 0x1000, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	if (buf == NULL) {
-		log_info("ERROR: write buffer allocation failed\n");
-		return;
-	}
-	snprintf(buf, 0x1000, "%s", "Hello world hhh!");
-	int rc = spdk_nvme_ns_cmd_write(spdk_namespace, myqpair, buf, 0, 1, mywrite_complete, NULL, 0);
-	if (rc != 0) {
-		log_info("starting write I/O failed\n");
-		return;
-	}
-}
+	log_info("[readObj] siz:%u, lba_start:%lu, lba_count:%lu", siz, lba_start, lba_count);
 
-static void myread_complete(void *arg, const struct spdk_nvme_cpl *completion)
-{
-	log_info("read completed!");
+	struct kthread *k = myk();
+	struct spdk_nvme_qpair* myqpair = k->storage_q.spdk_qp_handle;
 
-	char *buf = (char*)arg;
-	log_info("data: %s\n", buf);
+	char *buffer = spdk_zmalloc(lba_count * block_size, 0x1000, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA); 
+	if (buffer == NULL) { log_info("ERROR: read buffer allocation failed\n"); return; }
+
+	int rc = spdk_nvme_ns_cmd_read(spdk_namespace, myqpair, buffer, lba_start, lba_count, NULL, NULL, 0);
+	if (rc != 0) { log_info("starting read I/O failed\n"); exit(1); }
+
+	while (spdk_nvme_qpair_process_completions(myqpair, 0) != 1);
+	// log_info("Read LBA[%ld~%ld] completed!\n", lba_start, lba_start + lba_count - 1);
+
+	memcpy(obj, buffer, siz);
+	spdk_free(buffer);
 }
-void myread()
+void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)  // 将 obj 中的 siz B 写入到 LBA[lba_start, lba_start+lba_count-1]；obj 为 NULL 时，初始化这些 LBA 为全 0
 {
-	log_info("invoke myread()!");
-	char *buf = spdk_zmalloc(0x1000, 0x1000, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
-	if (buf == NULL) {
-		log_info("ERROR: write buffer allocation failed\n");
-		return;
-	}
-	int rc = spdk_nvme_ns_cmd_read(spdk_namespace, myqpair, buf, 0, 1, myread_complete, (void*)buf, 0);
-	if (rc != 0) {
-		log_info("starting read I/O failed\n");
-		return;
-	}
+	log_info("[writeObj] siz:%u, lba_start:%lu, lba_count:%lu", siz, lba_start, lba_count);
+
+	struct kthread *k = myk();
+	struct spdk_nvme_qpair* myqpair = k->storage_q.spdk_qp_handle;
+
+	char *buffer = spdk_zmalloc(siz, 0x1000, NULL, SPDK_ENV_LCORE_ID_ANY, SPDK_MALLOC_DMA);
+	if (buffer == NULL) { log_info("ERROR: write buffer allocation failed\n"); return; }
+
+	if (obj) memcpy(buffer, obj, siz);
+
+	int rc = spdk_nvme_ns_cmd_write(spdk_namespace, myqpair, buffer, lba_start, lba_count, NULL, NULL, 0);
+	if (rc != 0) { log_info("starting write I/O failed\n"); exit(1); }
+
+	while (spdk_nvme_qpair_process_completions(myqpair, 0) != 1);
+	// if (debug) log_info("Write LBA[%ld~%ld] completed!\n", lba_start, lba_start + lba_count - 1);
+
+	spdk_free(buffer);
 }
 
 #else
