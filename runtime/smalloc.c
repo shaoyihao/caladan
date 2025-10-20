@@ -69,7 +69,6 @@ void *smalloc(size_t size)
 	pt = perthread_ptr(smalloc_pts[smalloc_size_to_idx(size)]);
 	item = tcache_alloc(pt);
 	preempt_enable();
-
 	return item;
 }
 

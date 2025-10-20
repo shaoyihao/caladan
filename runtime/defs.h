@@ -331,11 +331,6 @@ struct timer_idx {
 	struct timer_entry	*e;
 };
 
-struct LBAPool
-{
-	uint64_t blocknum[RESERVED_BLOCK_NUM];
-	int top;
-};
 
 struct kthread {
 	/* 1st cache-line */
@@ -390,8 +385,7 @@ struct kthread {
 	uint64_t		stats[STAT_NR];    // 200B
 
 	/* my new cacheline */
-	PAD_TO_CACHE_LINE(stats_pad, 200);
-	struct LBAPool	 blocks;    // 为每个 kthread 保留一些 LBA 供使用
+	// PAD_TO_CACHE_LINE(stats_pad, 200);
 };
 
 /* compile-time verification of cache-line alignment */
@@ -404,7 +398,6 @@ BUILD_ASSERT(offsetof(struct kthread, timer_lock) % CACHE_LINE_SIZE == 0);
 BUILD_ASSERT(offsetof(struct kthread, storage_q) % CACHE_LINE_SIZE == 0);
 #endif
 BUILD_ASSERT(offsetof(struct kthread, stats) % CACHE_LINE_SIZE == 0);
-BUILD_ASSERT(offsetof(struct kthread, blocks) % CACHE_LINE_SIZE == 0);
 
 DECLARE_PERTHREAD(struct kthread *, mykthread);
 
