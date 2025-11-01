@@ -402,6 +402,10 @@ void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 {
 	if (!cfg_storage_enabled) return -ENODEV;
 
+	thread_t *th = thread_self();
+	uint64_t before_readObj = thread_get_total_cycles(th) / cycles_per_us;
+	uint64_t before_readObj_tsc = rdtsc();
+	
 	size_t req_size = lba_count * block_size;
 	bool use_thread_cache = req_size <= REQUEST_BUF_SZ;
 
@@ -426,7 +430,9 @@ void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	}
 
 	q->outstanding_reqs++;
+	uint64_t before_park = rdtsc();
 	thread_park_and_unlock_np(&q->lock);
+	uint64_t after_park = rdtsc();
 	memcpy(obj, spdk_payload, siz);
 	preempt_disable();
 
@@ -434,11 +440,19 @@ done_np:
 	if (likely(use_thread_cache)) tcache_free(perthread_ptr(storage_buf_pt), spdk_payload);
 	else spdk_free(spdk_payload);
 	preempt_enable();
+
+	uint64_t after_readObj = thread_get_total_cycles(th) / cycles_per_us;
+	uint64_t after_readObj_tsc = rdtsc();
+	log_info("[readObj(LBA:%lu, cnt:%u)] duration: %lu us, actual time: %lu us [parktime: %lu us]", lba_start, lba_count, (after_readObj_tsc - before_readObj_tsc) / cycles_per_us, after_readObj - before_readObj, (after_park - before_park) / cycles_per_us);
 }
 
 void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 {	
 	if (!cfg_storage_enabled) return -ENODEV;
+
+	thread_t *th = thread_self();
+	uint64_t before_writeObj = thread_get_total_cycles(th) / cycles_per_us;
+	uint64_t before_writeObj_tsc = rdtsc();
 
 	size_t req_size = lba_count * block_size;
 	bool use_thread_cache = req_size <= REQUEST_BUF_SZ;
@@ -465,7 +479,10 @@ void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	}
 
 	q->outstanding_reqs++;
+
+	uint64_t before_park = rdtsc();
 	thread_park_and_unlock_np(&q->lock);
+	uint64_t after_park = rdtsc();
 
 	preempt_disable();
 
@@ -474,6 +491,10 @@ done_np:
 	else spdk_free(spdk_payload);
 
 	preempt_enable();
+
+	uint64_t after_writeObj = thread_get_total_cycles(th) / cycles_per_us;
+	uint64_t after_writeObj_tsc = rdtsc();
+	log_info("[writeObj(LBA:%lu, cnt:%u)] duration: %lu us, actual time: %lu us [parktime: %lu us]", lba_start, lba_count, (after_writeObj_tsc - before_writeObj_tsc) / cycles_per_us, after_writeObj - before_writeObj, (after_park - before_park) / cycles_per_us);
 }
 
 // void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)   // 读取 LBA[lba_start, lba_start+lba_count-1]，将前 siz B 复制到 obj（空间需提前申请） 

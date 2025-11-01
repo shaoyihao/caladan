@@ -32,6 +32,7 @@ static int init_internal(void)
 	ret = time_init();
 	if (ret)
 		return ret;
+	log_info("cycle per us: %d", cycles_per_us);
 
 	ret = page_init();
 	if (ret) {
