@@ -49,7 +49,7 @@ static inline int8_t atomic8_fetch_and_add_relaxed(atomic8_t *a, int8_t val)
 
 static inline int atomic_fetch_and_sub(atomic_t *a, int val)
 {
-	return __sync_fetch_and_add(&a->cnt, val);
+	return __sync_fetch_and_sub(&a->cnt, val);
 }
 
 static inline long atomic_fetch_and_or(atomic_t *a, int val)

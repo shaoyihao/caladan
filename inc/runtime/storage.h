@@ -9,6 +9,8 @@
 extern int storage_write(const void *payload, uint64_t lba, uint32_t lba_count);
 extern int storage_read(void *dest, uint64_t lba, uint32_t lba_count);
 
+extern void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count);
+extern void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count);
 
 
 /*

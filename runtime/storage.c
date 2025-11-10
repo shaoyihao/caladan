@@ -412,9 +412,11 @@ void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	struct kthread *k = getk();
 	struct storage_q *q = &k->storage_q;
 
+	uint64_t before_spdkalloc_tsc = rdtsc();
 	void *spdk_payload;
 	if (likely(use_thread_cache)) spdk_payload = tcache_alloc(perthread_ptr(storage_buf_pt));
 	else spdk_payload = spdk_zmalloc(req_size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+	uint64_t after_spdkalloc_tsc = rdtsc();
 
 	if (unlikely(spdk_payload == NULL)) {
 		putk();
@@ -422,7 +424,9 @@ void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	}
 
 	spin_lock(&q->lock);
+	uint64_t before_cmd_tsc = rdtsc();
 	int rc = spdk_nvme_ns_cmd_read(spdk_namespace, q->spdk_qp_handle, spdk_payload, lba_start, lba_count, seq_complete, thread_self(), 0);
+	uint64_t after_cmd_tsc = rdtsc();
 
 	if (unlikely(rc != 0)) {
 		spin_unlock(&q->lock);
@@ -443,7 +447,8 @@ done_np:
 
 	uint64_t after_readObj = thread_get_total_cycles(th) / cycles_per_us;
 	uint64_t after_readObj_tsc = rdtsc();
-	log_info("[readObj(LBA:%lu, cnt:%u)] duration: %lu us, actual time: %lu us [parktime: %lu us]", lba_start, lba_count, (after_readObj_tsc - before_readObj_tsc) / cycles_per_us, after_readObj - before_readObj, (after_park - before_park) / cycles_per_us);
+	log_info("[readObj() %lu us, %lu us]", (before_park - before_readObj_tsc) / cycles_per_us, (after_readObj_tsc - after_park) / cycles_per_us);
+	// log_info("[readObj(LBA:%lu, cnt:%u)] duration: %lu us, actual time: %lu us [parktime: %lu us], spdkalloc: %lu us, cmd: %lu us", lba_start, lba_count, (after_readObj_tsc - before_readObj_tsc) / cycles_per_us, after_readObj - before_readObj, (after_park - before_park) / cycles_per_us, (after_spdkalloc_tsc - before_spdkalloc_tsc) / cycles_per_us, (after_cmd_tsc - before_cmd_tsc) / cycles_per_us);
 }
 
 void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
@@ -460,9 +465,11 @@ void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	struct kthread *k = getk();
 	struct storage_q *q = &k->storage_q;
 
+	uint64_t before_spdkalloc_tsc = rdtsc();
 	void *spdk_payload;
 	if (likely(use_thread_cache)) spdk_payload = tcache_alloc(perthread_ptr(storage_buf_pt));
 	else spdk_payload = spdk_zmalloc(req_size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
+	uint64_t after_spdkalloc_tsc = rdtsc();
 
 	if (unlikely(spdk_payload == NULL)) {
 		putk();
@@ -471,7 +478,10 @@ void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	if (obj) memcpy(spdk_payload, obj, siz);
 
 	spin_lock(&q->lock);
+	
+	uint64_t before_cmd_tsc = rdtsc();
 	int rc = spdk_nvme_ns_cmd_write(spdk_namespace, q->spdk_qp_handle, spdk_payload, lba_start, lba_count, seq_complete, thread_self(), 0);
+	uint64_t after_cmd_tsc = rdtsc();
 
 	if (unlikely(rc != 0)) {
 		spin_unlock(&q->lock);
@@ -494,7 +504,7 @@ done_np:
 
 	uint64_t after_writeObj = thread_get_total_cycles(th) / cycles_per_us;
 	uint64_t after_writeObj_tsc = rdtsc();
-	log_info("[writeObj(LBA:%lu, cnt:%u)] duration: %lu us, actual time: %lu us [parktime: %lu us]", lba_start, lba_count, (after_writeObj_tsc - before_writeObj_tsc) / cycles_per_us, after_writeObj - before_writeObj, (after_park - before_park) / cycles_per_us);
+	log_info("[writeObj(LBA:%lu, cnt:%u)] duration: %lu us, actual time: %lu us [parktime: %lu us] spdkalloc: %lu us, cmd: %lu us", lba_start, lba_count, (after_writeObj_tsc - before_writeObj_tsc) / cycles_per_us, after_writeObj - before_writeObj, (after_park - before_park) / cycles_per_us, (after_spdkalloc_tsc - before_spdkalloc_tsc) / cycles_per_us, (after_cmd_tsc - before_cmd_tsc) / cycles_per_us);
 }
 
 // void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)   // 读取 LBA[lba_start, lba_start+lba_count-1]，将前 siz B 复制到 obj（空间需提前申请） 

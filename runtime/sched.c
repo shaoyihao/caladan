@@ -99,10 +99,9 @@ static void jmp_thread(thread_t *th)
 		deliver_signals_jmp_thread(th);
 
 	if (th->junction_thread == true) 
-	{
-		// log_info("Scheduling junction thread, current runtime: %lu us", th->total_cycles / cycles_per_us);
-		log_info("Scheduling junction thread, current runtime: %lu us", thread_get_total_cycles(th) / cycles_per_us);
-	}
+		log_info("jump_thread to junction thread, current runtime: %lu us", thread_get_total_cycles(th) / cycles_per_us);
+	else
+		log_info("jump_thread to other uthread: %p, current runtime: %lu us", th, thread_get_total_cycles(th) / cycles_per_us);
 	__jmp_thread(&th->tf);
 }
 
@@ -133,6 +132,10 @@ static void jmp_thread_direct(thread_t *oldth, thread_t *newth)
 	set_fsbase(newth->tf.fsbase);
 
 	newth->thread_running = true;
+	if (newth->junction_thread == true) 
+		log_info("jmp_thread_direct to junction thread, current runtime: %lu us", thread_get_total_cycles(newth) / cycles_per_us);
+	else 
+		log_info("jmp_thread_direct to other uthread: %p, current runtime: %lu us", newth, thread_get_total_cycles(newth) / cycles_per_us);
 	__jmp_thread_direct(&oldth->tf, &newth->tf, &oldth->thread_running);
 }
 
@@ -368,7 +371,7 @@ static __noinline void schedule(void)
 	if (likely(th != NULL)) {
 		store_release(&th->thread_running, false);
 		th->total_cycles += prog_cycles;
-		if (th->junction_thread == true) log_info("[schedule()] last_tsc: %lu, this cycle time: %lu us, current total time: %lu us", perthread_read_stable(last_tsc), prog_cycles / cycles_per_us, th->total_cycles / cycles_per_us);
+		// if (th->junction_thread == true) log_info("[schedule()] last_tsc: %lu, this cycle time: %lu us, current total time: %lu us", perthread_read_stable(last_tsc), prog_cycles / cycles_per_us, th->total_cycles / cycles_per_us);
 		store_release(&th->cur_kthread, NCPU);
 		perthread_store(__self, NULL);
 		th = NULL;
@@ -489,6 +492,7 @@ done:
 	/* update exit stat counters */
 	perthread_get_stable(last_tsc) = rdtsc();
 	STAT(SCHED_CYCLES) += perthread_get_stable(last_tsc) - start_tsc;
+	// log_info("sched time: %lu us", (perthread_get_stable(last_tsc) - start_tsc) / cycles_per_us);
 	if (cores_have_affinity(th->last_cpu, l->curr_cpu))
 		STAT(LOCAL_RUNS)++;
 	else
@@ -532,17 +536,17 @@ static __always_inline void enter_schedule(thread_t *curth)
 	    (!disable_watchdog &&
 	     unlikely(now_tsc - k->last_softirq_tsc >
 		      cycles_per_us * RUNTIME_WATCHDOG_US))) {
-		log_info("SLOW path, get into schedule()");
+		// log_info("SLOW path, get into schedule()");
 		jmp_runtime(schedule);
 		return;
 	}
 
 	/* fast path: switch directly to the next uthread */
-	log_info("FAST path, jump directly to the next uthread");
+	// log_info("FAST path, jump directly to the next uthread");
 	prog_cycles = now_tsc - perthread_get_stable(last_tsc);
 	STAT(PROGRAM_CYCLES) += prog_cycles;
 	curth->total_cycles += prog_cycles;
-	if (curth->junction_thread == true) log_info("[enter_schedule()] last_tsc: %lu, this cycle time: %lu us, current total time: %lu us", perthread_get_stable(last_tsc), prog_cycles / cycles_per_us, curth->total_cycles / cycles_per_us);
+	// if (curth->junction_thread == true) log_info("[enter_schedule()] last_tsc: %lu, this cycle time: %lu us, current total time: %lu us", perthread_get_stable(last_tsc), prog_cycles / cycles_per_us, curth->total_cycles / cycles_per_us);
 	perthread_get_stable(last_tsc) = now_tsc;
 
 	/* pop the next runnable thread from the queue */
@@ -1005,6 +1009,7 @@ int thread_spawn_main(thread_fn_t fn, void *arg)
 	th = thread_create(fn, arg);
 	if (!th)
 		return -ENOMEM;
+	// log_info("Created [main] uthread: %p", th);
 	th->main_thread = true;
 	thread_ready(th);
 	return 0;
@@ -1022,7 +1027,7 @@ static void thread_finish_exit(void)
 {
 	struct thread *th = thread_self();
 
-	if (th->junction_thread == true) log_info("[thread_finish_exit()] total time: %lu us", th->total_cycles / cycles_per_us);
+	// if (th->junction_thread == true) log_info("[thread_finish_exit()] total time: %lu us", th->total_cycles / cycles_per_us);
 
 	thread_free(th);
 	perthread_store(__self, NULL);
