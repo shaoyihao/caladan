@@ -400,11 +400,11 @@ int storage_init(void)
 
 void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 {
-	if (!cfg_storage_enabled) return -ENODEV;
+	if (!cfg_storage_enabled) return;
 
-	thread_t *th = thread_self();
-	uint64_t before_readObj = thread_get_total_cycles(th) / cycles_per_us;
-	uint64_t before_readObj_tsc = rdtsc();
+	// thread_t *th = thread_self();
+	// uint64_t before_readObj = thread_get_total_cycles(th) / cycles_per_us;
+	// uint64_t before_readObj_tsc = rdtsc();
 	
 	size_t req_size = lba_count * block_size;
 	bool use_thread_cache = req_size <= REQUEST_BUF_SZ;
@@ -412,11 +412,11 @@ void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	struct kthread *k = getk();
 	struct storage_q *q = &k->storage_q;
 
-	uint64_t before_spdkalloc_tsc = rdtsc();
+	// uint64_t before_spdkalloc_tsc = rdtsc();
 	void *spdk_payload;
 	if (likely(use_thread_cache)) spdk_payload = tcache_alloc(perthread_ptr(storage_buf_pt));
 	else spdk_payload = spdk_zmalloc(req_size, 0, NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);
-	uint64_t after_spdkalloc_tsc = rdtsc();
+	// uint64_t after_spdkalloc_tsc = rdtsc();
 
 	if (unlikely(spdk_payload == NULL)) {
 		putk();
@@ -424,9 +424,9 @@ void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	}
 
 	spin_lock(&q->lock);
-	uint64_t before_cmd_tsc = rdtsc();
+	// uint64_t before_cmd_tsc = rdtsc();
 	int rc = spdk_nvme_ns_cmd_read(spdk_namespace, q->spdk_qp_handle, spdk_payload, lba_start, lba_count, seq_complete, thread_self(), 0);
-	uint64_t after_cmd_tsc = rdtsc();
+	// uint64_t after_cmd_tsc = rdtsc();
 
 	if (unlikely(rc != 0)) {
 		spin_unlock(&q->lock);
@@ -434,9 +434,9 @@ void readObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 	}
 
 	q->outstanding_reqs++;
-	uint64_t before_park = rdtsc();
+	// uint64_t before_park = rdtsc();
 	thread_park_and_unlock_np(&q->lock);
-	uint64_t after_park = rdtsc();
+	// uint64_t after_park = rdtsc();
 	memcpy(obj, spdk_payload, siz);
 	preempt_disable();
 
@@ -445,15 +445,15 @@ done_np:
 	else spdk_free(spdk_payload);
 	preempt_enable();
 
-	uint64_t after_readObj = thread_get_total_cycles(th) / cycles_per_us;
-	uint64_t after_readObj_tsc = rdtsc();
-	log_info("[readObj() %lu us, %lu us]", (before_park - before_readObj_tsc) / cycles_per_us, (after_readObj_tsc - after_park) / cycles_per_us);
+	// uint64_t after_readObj = thread_get_total_cycles(th) / cycles_per_us;
+	// uint64_t after_readObj_tsc = rdtsc();
+	// log_info("[readObj() %lu us, %lu us]", (before_park - before_readObj_tsc) / cycles_per_us, (after_readObj_tsc - after_park) / cycles_per_us);
 	// log_info("[readObj(LBA:%lu, cnt:%u)] duration: %lu us, actual time: %lu us [parktime: %lu us], spdkalloc: %lu us, cmd: %lu us", lba_start, lba_count, (after_readObj_tsc - before_readObj_tsc) / cycles_per_us, after_readObj - before_readObj, (after_park - before_park) / cycles_per_us, (after_spdkalloc_tsc - before_spdkalloc_tsc) / cycles_per_us, (after_cmd_tsc - before_cmd_tsc) / cycles_per_us);
 }
 
 void writeObj(void* obj, size_t siz, uint64_t lba_start, uint32_t lba_count)
 {	
-	if (!cfg_storage_enabled) return -ENODEV;
+	if (!cfg_storage_enabled) return;
 
 	thread_t *th = thread_self();
 	uint64_t before_writeObj = thread_get_total_cycles(th) / cycles_per_us;
@@ -606,6 +606,110 @@ done_np:
 // 	preempt_enable();
 // 	spin_unlock(&q->lock);
 // }
+
+typedef struct BlockEntry
+{
+    uint64_t    lba;
+    char*       data;
+    bool        valid;    // 是否从盘上读取了数据
+    bool        dirty;    // 是否需要写回磁盘
+    spinlock_t  mtx;
+} BlockEntry;
+struct block_sgl_ctx 
+{
+    void*        *blockentries;     // 若干个 BlockEntry 地址构成的数组
+    uint32_t     num_blocks;        // 一共多少个 block
+    uint32_t     block_size;        // = BLOCK_SIZE
+    uint32_t     cur_index;         // 当前走到第几个 block
+};
+struct vectorIO_ctx 
+{
+    struct block_sgl_ctx sgl;
+	thread_t *th;
+};
+
+void block_reset_sgl(void *arg, uint32_t offset)
+{
+    struct vectorIO_ctx *ctx = (struct vectorIO_ctx *)arg;
+    ctx->sgl.cur_index = offset / ctx->sgl.block_size;
+}
+int block_next_sge(void *arg, void **address, uint32_t *length)
+{
+    struct vectorIO_ctx *ctx = (struct vectorIO_ctx *)arg;
+    struct block_sgl_ctx *sgl = &ctx->sgl;
+
+    if (sgl->cur_index >= sgl->num_blocks) return -1;  // 没有更多 buffer 了
+
+    BlockEntry* blockentry = (BlockEntry*)sgl->blockentries[sgl->cur_index++];
+    *address = blockentry->data;
+    *length  = sgl->block_size;
+    return 0;
+}
+
+void vectorIO_complete(void *arg, const struct spdk_nvme_cpl *cpl)
+{
+    struct vectorIO_ctx *ctx = (struct vectorIO_ctx *)arg;
+	thread_ready(ctx->th);
+}
+
+int read_blocks_from_disk(uint64_t lba_start, uint32_t lba_count, void* blockentries[])
+{
+	if (!cfg_storage_enabled) return -1;
+	if (unlikely(lba_count == 0)) return -1;
+
+	struct vectorIO_ctx ctx = {};
+	ctx.th = thread_self();
+	ctx.sgl.blockentries = blockentries;
+	ctx.sgl.num_blocks = lba_count;
+	ctx.sgl.block_size = block_size;
+	ctx.sgl.cur_index = 0;
+
+	struct kthread   *k = getk();
+    struct storage_q *q = &k->storage_q;
+	
+	spin_lock(&q->lock);
+	int rc = spdk_nvme_ns_cmd_readv(spdk_namespace, q->spdk_qp_handle, lba_start, lba_count, vectorIO_complete, &ctx, 0, block_reset_sgl, block_next_sge);
+	if (unlikely(rc != 0)) 
+	{
+        spin_unlock(&q->lock);
+        putk();
+        return -1;
+    }
+	q->outstanding_reqs++;
+	thread_park_and_unlock_np(&q->lock);
+	return 0;
+}
+
+int write_blocks_to_disk(uint64_t lba_start, uint32_t lba_count, void* blockentries[])
+{
+    if (!cfg_storage_enabled) return -1;
+    if (unlikely(lba_count == 0)) return -1;
+
+    struct vectorIO_ctx ctx = {};
+    ctx.th = thread_self();
+    ctx.sgl.blockentries = blockentries;
+    ctx.sgl.num_blocks = lba_count;
+    ctx.sgl.block_size = block_size;
+    ctx.sgl.cur_index = 0;
+
+    struct kthread *k = getk();
+    struct storage_q *q = &k->storage_q;
+    spin_lock(&q->lock);
+
+    int rc = spdk_nvme_ns_cmd_writev(spdk_namespace, q->spdk_qp_handle, lba_start, lba_count, vectorIO_complete, &ctx, 0, block_reset_sgl, block_next_sge);
+    if (unlikely(rc != 0)) 
+    {
+        spin_unlock(&q->lock);
+        putk();
+        return -1;
+    }
+
+    q->outstanding_reqs++;
+    thread_park_and_unlock_np(&q->lock);
+
+    return 0;
+}
+
 
 #else
 int storage_write(const void *payload, uint64_t lba, uint32_t lba_count)

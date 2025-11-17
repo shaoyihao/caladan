@@ -98,10 +98,10 @@ static void jmp_thread(thread_t *th)
 	if (unlikely(sched_needs_signal_check(th)))
 		deliver_signals_jmp_thread(th);
 
-	if (th->junction_thread == true) 
-		log_info("jump_thread to junction thread, current runtime: %lu us", thread_get_total_cycles(th) / cycles_per_us);
-	else
-		log_info("jump_thread to other uthread: %p, current runtime: %lu us", th, thread_get_total_cycles(th) / cycles_per_us);
+	// if (th->junction_thread == true) 
+	// 	log_info("jump_thread to junction thread, current runtime: %lu us", thread_get_total_cycles(th) / cycles_per_us);
+	// else
+	// 	log_info("jump_thread to other uthread: %p, current runtime: %lu us", th, thread_get_total_cycles(th) / cycles_per_us);
 	__jmp_thread(&th->tf);
 }
 
@@ -132,10 +132,10 @@ static void jmp_thread_direct(thread_t *oldth, thread_t *newth)
 	set_fsbase(newth->tf.fsbase);
 
 	newth->thread_running = true;
-	if (newth->junction_thread == true) 
-		log_info("jmp_thread_direct to junction thread, current runtime: %lu us", thread_get_total_cycles(newth) / cycles_per_us);
-	else 
-		log_info("jmp_thread_direct to other uthread: %p, current runtime: %lu us", newth, thread_get_total_cycles(newth) / cycles_per_us);
+	// if (newth->junction_thread == true) 
+	// 	log_info("jmp_thread_direct to junction thread, current runtime: %lu us", thread_get_total_cycles(newth) / cycles_per_us);
+	// else 
+	// 	log_info("jmp_thread_direct to other uthread: %p, current runtime: %lu us", newth, thread_get_total_cycles(newth) / cycles_per_us);
 	__jmp_thread_direct(&oldth->tf, &newth->tf, &oldth->thread_running);
 }
 
